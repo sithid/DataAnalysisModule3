@@ -1,75 +1,104 @@
+// Orbital Debris Assessment — SQL Schema (DBML)
 // Docs: https://dbml.dbdiagram.io/docs
-// Various extensions installed to work with DMBL (syntax highlighting, etc )
 
+// =============================================================================
+// CORE IDENTITY TABLE — one row per tracked space object
+// =============================================================================
 Table satellites {
-  norad_id integer [primary key]
-  object_name varchar
-  object_type varchar
-  launch_date timestamp
-  ops_status varchar
-  owner_id integer [not null]
-  launch_id integer [not null]
+  norad_id integer [primary key, note: 'NORAD catalog number (assigned by Space Command)']
+  cospar_id varchar [note: 'International designator (e.g. 2024-042A)']
+  object_name varchar [note: 'SATCAT catalog name']
+  satellite_name varchar [note: 'UCS common name (null for debris/rocket bodies)']
+  official_name varchar [note: 'Formal/official satellite name']
+  object_type varchar [note: 'PAYLOAD, ROCKET BODY, or DEBRIS']
+  category varchar [note: 'Finer object classification']
+  ops_status varchar [note: 'OPERATIONAL, NON-OPERATIONAL, etc.']
+  data_status varchar [note: 'Data completeness flag']
+  in_orbit boolean [note: 'Currently in orbit?']
+  owner_code varchar [not null, note: 'FK → ownership_operators']
+  launch_id varchar [not null, note: 'FK → launch_events (derived from cospar_id)']
 }
 
+// =============================================================================
+// ORBITAL & PHYSICAL PROFILE — orbit geometry + mass + size (1:1 with satellites)
+// =============================================================================
 Table orbital_data {
-  norad_id integer [primary key]
-  orbit_class varchar
-  inclination_degrees integer
-  period_minutes integer
-  perigee_km integer
-  apogee_km integer
-  eccentricity integer
-  mass_kg integer
-  dry_mass_kg integer
-  rcs_m2 integer
-  rcs_class varchar
-  mass_source_tier varchar
+  norad_id integer [primary key, note: 'FK → satellites']
+  orbit_class varchar [note: 'LEO, MEO, GEO, HEO, etc.']
+  orbit_type varchar [note: 'Sun-synchronous, polar, equatorial, etc.']
+  period_minutes decimal [note: 'Orbital period in minutes']
+  perigee_km decimal [note: 'Closest approach altitude (km)']
+  apogee_km decimal [note: 'Farthest altitude (km)']
+  inclination_degrees decimal [note: 'Orbital inclination (degrees)']
+  eccentricity decimal [note: 'Orbit shape (0 = circular, 1 = parabolic)']
+  semi_major_axis_km decimal [note: 'Semi-major axis (km)']
+  launch_mass_kg decimal [note: 'Measured launch mass (Tier 1 from UCS where available)']
+  proxy_mass_kg decimal [note: 'Imputed/proxy mass (Tier 2-3 fallback)']
+  dry_mass_kg decimal [note: 'Structural mass after fuel subtraction']
+  power_watts decimal [note: 'Measured power output (watts)']
+  proxy_power_watts decimal [note: 'Imputed power output (watts)']
+  rcs decimal [note: 'Radar cross-section (m²)']
+  rcs_class varchar [note: 'SMALL (<0.1), MEDIUM (0.1-1.0), LARGE (>1.0)']
 }
 
+// =============================================================================
+// OWNERSHIP & OPERATOR LOOKUP — one row per unique owner (1:Many → satellites)
+// =============================================================================
 Table ownership_operators {
-  owner_id integer [primary key, increment]
-  owner_country varchar
-  operator_name varchar
-  users_category varchar
-  purpose varchar
+  owner_code varchar [primary key, note: 'Country/org code (e.g. US, CIS, PRC)']
+  owner varchar [note: 'Owner name']
+  country_operator varchar [note: 'Country of the operator']
+  users varchar [note: 'Government, commercial, military, civil']
+  is_commercial boolean [note: 'Commercial use flag']
+  is_government boolean [note: 'Government use flag']
+  is_military boolean [note: 'Military use flag']
+  is_civil boolean [note: 'Civil use flag']
+  contractor varchar [note: 'Satellite manufacturer']
+  contractor_country varchar [note: 'Manufacturer country']
 }
 
+// =============================================================================
+// LAUNCH EVENTS — one row per launch mission (1:Many → satellites)
+// =============================================================================
 Table launch_events {
-  launch_id integer [primary key, increment]
-  launch_date timestamp
-  launch_site varchar
-  launch_vehicle varchar
-  launch_year integer
+  launch_id varchar [primary key, note: 'Derived from cospar_id (e.g. 2024-042)']
+  launch_date timestamp [note: 'Date of launch']
+  launch_year integer [note: 'Extracted year for trend analysis']
+  launch_site varchar [note: 'Launch facility (e.g. AFETR, TYMSC)']
 }
 
+// =============================================================================
+// UCS ACTIVE SATELLITE DETAILS — enrichment for active payloads only (1:1 subset)
+// =============================================================================
 Table ucs_details {
-  norad_id integer [primary key]
-  satellite_name varchar
-  lifetime_years integer
-  launch_mass_kg integer
-  orbit_type varchar
-  active_flag varchar
+  norad_id integer [primary key, note: 'FK → satellites']
+  lifetime_years decimal [note: 'Design lifetime (years)']
+  sat_age_years decimal [note: 'Current age = 2026 − launch_year']
+  primary_purpose varchar [note: 'High-level mission (communications, Earth observation, etc.)']
+  detailed_purpose varchar [note: 'Specific mission detail']
+  geo_longitude decimal [note: 'GEO longitude station (null for non-GEO)']
+  un_registry varchar [note: 'UN registration status']
 }
 
+// =============================================================================
+// RISK ASSESSMENT — derived analytics per object (1:1)
+// =============================================================================
 Table risk_assessment {
-  norad_id integer [primary key]
-  mean_orbital_velocity_kms integer
-  kinetic_energy_index integer
-  zombie_flag integer
-  risk_band integer
+  norad_id integer [primary key, note: 'FK → satellites']
+  velocity_kms decimal [note: 'Mean orbital velocity (km/s) via Vis-Viva']
+  kinetic_joules decimal [note: 'Kinetic energy (joules)']
+  is_zombie boolean [note: 'Exceeds 110% of design lifetime?']
 }
 
-// One satellite record can have one related orbital-data profile (joined by NORAD ID).
+// =============================================================================
+// RELATIONSHIPS
+// =============================================================================
+
+// 1:1 — child tables share the same norad_id as their parent satellite record
 ref: orbital_data.norad_id > satellites.norad_id
-
-// UCS details extend a satellite with supplemental descriptive fields (same NORAD ID).
 ref: ucs_details.norad_id > satellites.norad_id
-
-// Risk metrics are derived per satellite and connect back by NORAD ID.
 ref: risk_assessment.norad_id > satellites.norad_id
 
-// Many satellites can share the same owner/operator.
-ref: satellites.owner_id > ownership_operators.owner_id
-
-// Many satellites can originate from the same launch event.
+// Many:1 — each satellite points to one owner and one launch event
+ref: satellites.owner_code > ownership_operators.owner_code
 ref: satellites.launch_id > launch_events.launch_id
