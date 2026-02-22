@@ -1,0 +1,75 @@
+// Docs: https://dbml.dbdiagram.io/docs
+// Various extensions installed to work with DMBL (syntax highlighting, etc )
+
+Table satellites {
+  norad_id integer [primary key]
+  object_name varchar
+  object_type varchar
+  launch_date timestamp
+  ops_status varchar
+  owner_id integer [not null]
+  launch_id integer [not null]
+}
+
+Table orbital_data {
+  norad_id integer [primary key]
+  orbit_class varchar
+  inclination_degrees integer
+  period_minutes integer
+  perigee_km integer
+  apogee_km integer
+  eccentricity integer
+  mass_kg integer
+  dry_mass_kg integer
+  rcs_m2 integer
+  rcs_class varchar
+  mass_source_tier varchar
+}
+
+Table ownership_operators {
+  owner_id integer [primary key, increment]
+  owner_country varchar
+  operator_name varchar
+  users_category varchar
+  purpose varchar
+}
+
+Table launch_events {
+  launch_id integer [primary key, increment]
+  launch_date timestamp
+  launch_site varchar
+  launch_vehicle varchar
+  launch_year integer
+}
+
+Table ucs_details {
+  norad_id integer [primary key]
+  satellite_name varchar
+  lifetime_years integer
+  launch_mass_kg integer
+  orbit_type varchar
+  active_flag varchar
+}
+
+Table risk_assessment {
+  norad_id integer [primary key]
+  mean_orbital_velocity_kms integer
+  kinetic_energy_index integer
+  zombie_flag integer
+  risk_band integer
+}
+
+// One satellite record can have one related orbital-data profile (joined by NORAD ID).
+ref: orbital_data.norad_id > satellites.norad_id
+
+// UCS details extend a satellite with supplemental descriptive fields (same NORAD ID).
+ref: ucs_details.norad_id > satellites.norad_id
+
+// Risk metrics are derived per satellite and connect back by NORAD ID.
+ref: risk_assessment.norad_id > satellites.norad_id
+
+// Many satellites can share the same owner/operator.
+ref: satellites.owner_id > ownership_operators.owner_id
+
+// Many satellites can originate from the same launch event.
+ref: satellites.launch_id > launch_events.launch_id
